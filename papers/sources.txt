@@ -1,0 +1,5 @@
+Random Sampling Plus Fake Data: Multidimensional Frequency Estimates With Local Differential Privacy
+https://doi.org/10.1145/3459637.3482467
+https://arxiv.org/abs/2109.07269
+https://github.com/hharcolezi/ldp-protocols-mobility-cdrs/tree/main/papers/%5B2%5D
+
