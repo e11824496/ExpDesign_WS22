@@ -1,5 +1,19 @@
+1
+SPLADE: Sparse Lexical and Expansion Model for First Stage Ranking
+https://doi.org/10.1145/3404835.3463098
+https://www.semanticscholar.org/paper/SPLADE%3A-Sparse-Lexical-and-Expansion-Model-for-Formal-Piwowarski/1e8a6de5561f557ff9abf43d538d8d5e9347efa0
+https://github.com/naver/splade
+
+
+2
+UltraGCN: Ultra Simplification of Graph Convolutional Networks for Recommendation
+https://doi.org/10.1145/3459637.3482291
+https://www.semanticscholar.org/paper/UltraGCN%3A-Ultra-Simplification-of-Graph-Networks-Mao-Zhu/17be6098c6dba71eef609b3d45cf63a073c94221
+https://github.com/xue-pai/UltraGCN
+
+
+3
 Random Sampling Plus Fake Data: Multidimensional Frequency Estimates With Local Differential Privacy
 https://doi.org/10.1145/3459637.3482467
 https://arxiv.org/abs/2109.07269
 https://github.com/hharcolezi/ldp-protocols-mobility-cdrs/tree/main/papers/%5B2%5D
-
