@@ -87,6 +87,7 @@ def data_param_prepare(config_file):
     params['user_num'] = user_num
     params['item_num'] = item_num
 
+    print()
 
     # mask matrix for testing to accelarate testing speed
     mask = torch.zeros(user_num, item_num)
@@ -375,6 +376,16 @@ class UltraGCN(nn.Module):
     def get_device(self):
         return self.user_embeds.weight.device
 
+    def to(self, *args, **kwargs):
+        self = super().to(*args, **kwargs)
+        for k, v in self.constraint_mat.items(): 
+            self.constraint_mat[k] = v.to(*args, **kwargs)
+          
+        self.ii_constraint_mat = self.ii_constraint_mat.to(*args, **kwargs)
+        self.ii_neighbor_mat = self.ii_neighbor_mat.to(*args, **kwargs)
+
+        return self
+
 
 
 '''
@@ -575,6 +586,7 @@ def test(model, test_loader, test_ground_truth_list, mask, topk, n_user):
             batch_users = batch_users.to(model.get_device())
             rating = model.test_foward(batch_users) 
             rating = rating.cpu()
+            batch_users = batch_users.cpu()
             rating += mask[batch_users]
             
             _, rating_K = torch.topk(rating, k=topk)
