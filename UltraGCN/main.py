@@ -14,7 +14,7 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 
 
-def data_param_prepare(config_file):
+def data_param_prepare(config_file, validation_proportion):
 
     config = configparser.ConfigParser()
     config.read(config_file)
@@ -80,8 +80,9 @@ def data_param_prepare(config_file):
     test_file_path = config['Testing']['test_file_path']
 
     # dataset processing
-    train_data, test_data, train_mat, user_num, item_num, constraint_mat = load_data(train_file_path, test_file_path)
+    train_data, valid_data, test_data, train_mat, user_num, item_num, constraint_mat = load_data(train_file_path, test_file_path, validation_proportion)
     train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle = True, num_workers=5)
+    valid_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle = True, num_workers=5)
     test_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle=False, num_workers=5)
 
     params['user_num'] = user_num
@@ -95,6 +96,11 @@ def data_param_prepare(config_file):
     for (u, i) in train_data:
         mask[u][i] = -np.inf
         interacted_items[u].append(i)
+
+    valid_ground_truth_list = [[] for _ in range(user_num)]
+    for (u, i) in valid_data:
+        valid_ground_truth_list[u].append(i)
+
 
     # test user-item interaction, which is ground truth
     test_ground_truth_list = [[] for _ in range(user_num)]
@@ -114,7 +120,7 @@ def data_param_prepare(config_file):
         pstore(ii_neighbor_mat, ii_neigh_mat_path)
         pstore(ii_constraint_mat, ii_cons_mat_path)
 
-    return params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, test_loader, mask, test_ground_truth_list, interacted_items
+    return params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items
 
 
 
@@ -147,8 +153,10 @@ def get_ii_constraint_mat(train_mat, num_neighbors, ii_diagonal_zero = False):
 
     
 
-def load_data(train_file, test_file):
+def load_data(train_file, test_file, validation_proportion = 0):
     trainUniqueUsers, trainItem, trainUser = [], [], []
+    validUniqueUsers, validItem, validUser = [], [], []
+
     testUniqueUsers, testItem, testUser = [], [], []
     n_user, m_item = 0, 0
     trainDataSize, testDataSize = 0, 0
@@ -158,6 +166,17 @@ def load_data(train_file, test_file):
                 l = l.strip('\n').split(' ')
                 items = [int(i) for i in l[1:]]
                 uid = int(l[0])
+
+                if validation_proportion > 0:
+                    validation_size =  int(validation_proportion * len(items))
+                    if validation_size > 1: 
+                        validUniqueUsers.append(uid)
+                        validUser.extend([uid]*validation_size)
+                        validation_items = list(np.random.choice(items, validation_size))
+                        validItem.extend(validation_items)
+                        items = [i for i in items if i not in validation_items]
+                        
+
                 trainUniqueUsers.append(uid)
                 trainUser.extend([uid] * len(items))
                 trainItem.extend(items)
@@ -167,6 +186,10 @@ def load_data(train_file, test_file):
     trainUniqueUsers = np.array(trainUniqueUsers)
     trainUser = np.array(trainUser)
     trainItem = np.array(trainItem)
+
+    validUniqueUsers = np.array(validUniqueUsers)
+    validUser = np.array(validUser)
+    validItem = np.array(validItem)
 
     with open(test_file) as f:
         for l in f.readlines():
@@ -189,6 +212,7 @@ def load_data(train_file, test_file):
 
 
     train_data = []
+    valid_data = []
     test_data = []
 
     n_user += 1
@@ -196,6 +220,8 @@ def load_data(train_file, test_file):
 
     for i in range(len(trainUser)):
         train_data.append([trainUser[i], trainItem[i]])
+    for i in range(len(validUser)):
+        valid_data.append([validUser[i], validItem[i]])
     for i in range(len(testUser)):
         test_data.append([testUser[i], testItem[i]])
     train_mat = sp.dok_matrix((n_user, m_item), dtype=np.float32)
@@ -215,7 +241,7 @@ def load_data(train_file, test_file):
     constraint_mat = {"beta_uD": torch.from_numpy(beta_uD).reshape(-1),
                       "beta_iD": torch.from_numpy(beta_iD).reshape(-1)}
 
-    return train_data, test_data, train_mat, n_user, m_item, constraint_mat
+    return train_data, valid_data, test_data, train_mat, n_user, m_item, constraint_mat
 
 
 
@@ -392,7 +418,7 @@ class UltraGCN(nn.Module):
 Train
 '''
 ########################### TRAINING #####################################
-def train(model, optimizer, train_loader, test_loader, mask, test_ground_truth_list, interacted_items, params): 
+def train(model, optimizer, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items, params): 
     device = params['device']
     best_epoch, best_recall, best_ndcg = 0, 0, 0
     early_stop_count = 0
@@ -434,7 +460,11 @@ def train(model, optimizer, train_loader, test_loader, mask, test_ground_truth_l
             
         if need_test:
             start_time = time.time()
-            F1_score, Precision, Recall, NDCG = test(model, test_loader, test_ground_truth_list, mask, params['topk'], params['user_num'])
+            if valid_loader: 
+                F1_score, Precision, Recall, NDCG = test(model, valid_loader, valid_ground_truth_list, mask, params['topk'], params['user_num'])
+            else: 
+                F1_score, Precision, Recall, NDCG = test(model, test_loader, test_ground_truth_list, mask, params['topk'], params['user_num'])
+
             if params['enable_tensorboard']:
                 writer.add_scalar('Results/recall@20', Recall, epoch)
                 writer.add_scalar('Results/ndcg@20', NDCG, epoch)
@@ -464,6 +494,10 @@ def train(model, optimizer, train_loader, test_loader, mask, test_ground_truth_l
     writer.flush()
 
     print('Training end!')
+
+    F1_score, Precision, Recall, NDCG = test(model, test_loader, test_ground_truth_list, mask, params['topk'], params['user_num'])
+    print("Performance on TEST set: F1-score: {:5f} \t Precision: {:.5f}\t Recall: {:.5f}\tNDCG: {:.5f}".format(loss.item(), F1_score, Precision, Recall, NDCG))
+
 
 
 # The below 7 functions (hit, ndcg, RecallPrecision_ATk, MRRatK_r, NDCGatK_r, test_one_batch, getLabel) follow this license.
@@ -619,10 +653,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print('###################### UltraGCN ######################')
-
+    validation_proportion = 0.1
 
     print('1. Loading Configuration...')
-    params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, test_loader, mask, test_ground_truth_list, interacted_items = data_param_prepare(args.config_file)
+    params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items = data_param_prepare(args.config_file, validation_proportion)
     
     print('Load Configuration OK, show them below')
     print('Configuration:')
@@ -633,6 +667,9 @@ if __name__ == "__main__":
     ultragcn = ultragcn.to(params['device'])
     optimizer = torch.optim.Adam(ultragcn.parameters(), lr=params['lr'])
 
-    train(ultragcn, optimizer, train_loader, test_loader, mask, test_ground_truth_list, interacted_items, params)
+    if not validation_proportion: 
+        valid_loader = None
+
+    train(ultragcn, optimizer, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items, params)
 
     print('END')
