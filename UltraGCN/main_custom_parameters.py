@@ -14,7 +14,7 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 
 
-def data_param_prepare(config_file, custom_params):
+def data_param_prepare(config_file, custom_params, n_users, n_items):
     config = configparser.ConfigParser()
     config.read(config_file)
 
@@ -47,7 +47,7 @@ def data_param_prepare(config_file, custom_params):
 
 
     # dataset processing
-    train_data, test_data, train_mat, user_num, item_num, constraint_mat = load_data(train_file_path, test_file_path)
+    train_data, test_data, train_mat, user_num, item_num, constraint_mat = load_data(train_file_path, test_file_path, n_users, n_items)
     train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle = True, num_workers=5)
     test_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle=False, num_workers=5)
 
@@ -107,7 +107,7 @@ def get_ii_constraint_mat(train_mat, num_neighbors, ii_diagonal_zero = False):
     return res_mat.long(), res_sim_mat.float()
 
 
-def load_data(train_file, test_file):
+def load_data(train_file, test_file, n_load_users, n_load_items):
     trainUniqueUsers, trainItem, trainUser = [], [], []
     testUniqueUsers, testItem, testUser = [], [], []
     n_user, m_item = 0, 0
@@ -157,6 +157,7 @@ def load_data(train_file, test_file):
         train_data.append([trainUser[i], trainItem[i]])
     for i in range(len(testUser)):
         test_data.append([testUser[i], testItem[i]])
+    
     train_mat = sp.dok_matrix((n_user, m_item), dtype=np.float32)
 
     for x in train_data:
@@ -563,11 +564,11 @@ def test(model, test_loader, test_ground_truth_list, mask, topk, n_user):
     return F1_score, Precision, Recall, NDCG
 
 
-def run(config_file_path, custom_params = {}, report_progress=True):
+def run(config_file_path, custom_params={}, report_progress=True, n_users=None, n_items=None):
     print('###################### UltraGCN ######################')
 
     print('1. Loading Configuration...')
-    params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, test_loader, mask, test_ground_truth_list, interacted_items = data_param_prepare(config_file_path, custom_params)
+    params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, test_loader, mask, test_ground_truth_list, interacted_items = data_param_prepare(config_file_path, custom_params, n_users, n_items)
 
     print('Load Configuration OK, show them below')
     print('Configuration:')
