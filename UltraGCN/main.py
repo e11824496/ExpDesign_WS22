@@ -14,81 +14,52 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 
 
-def data_param_prepare(config_file, validation_proportion):
-
+def data_param_prepare(config_file, custom_params):
     config = configparser.ConfigParser()
     config.read(config_file)
 
+    int_params = ['embedding_dim', 'ii_neighbor_num', 'max_epoch', 'batch_size', 'test_batch_size', 'early_stop_epoch', 'negative_num', 'topk'] 
+    bool_params = ['enable_tensorboard', 'sampling_sift_pos']
+    float_params = ['initial_weight', 'learning_rate', 'w1', 'w2', 'w3', 'w4', 'negative_weight', 'gamma', 'lambda']
     params = {}
 
-    embedding_dim = config.getint('Model', 'embedding_dim')
-    params['embedding_dim'] = embedding_dim
-    ii_neighbor_num = config.getint('Model', 'ii_neighbor_num')
-    params['ii_neighbor_num'] = ii_neighbor_num
-    model_save_path = config['Model']['model_save_path']
-    params['model_save_path'] = model_save_path
-    max_epoch = config.getint('Model', 'max_epoch')
-    params['max_epoch'] = max_epoch
+    for k,v in config.items(): 
+        params.update(v)
 
-    params['enable_tensorboard'] = config.getboolean('Model', 'enable_tensorboard')
-    
- 
-    initial_weight = config.getfloat('Model', 'initial_weight')
-    params['initial_weight'] = initial_weight
+    params.update(custom_params)
 
-    dataset = config['Training']['dataset']
-    params['dataset'] = dataset
-    train_file_path = config['Training']['train_file_path']
-    gpu = config['Training']['gpu']
-    params['gpu'] = gpu
+    for p in int_params:
+        params[p] = int(params[p])
+    for p in bool_params:
+        params[p] = params[p] in ['1', 'yes', 'true', 'on']     # according to ConfigParser
+    for p in float_params: 
+        params[p] = float(params[p])
+
+    ii_neighbor_num = params['ii_neighbor_num']
+    dataset = params['dataset']
+    train_file_path = params['train_file_path']
+    batch_size = params['batch_size']
+    test_batch_size = params['test_batch_size']
+    test_file_path = params['test_file_path']
+    validation_proportion = params.get('validation_proportion', 0.0)      #own paramter
+
     device = torch.device('cuda:'+ params['gpu'] if torch.cuda.is_available() else "cpu")
     params['device'] = device
-    lr = config.getfloat('Training', 'learning_rate')
-    params['lr'] = lr
-    batch_size = config.getint('Training', 'batch_size')
-    params['batch_size'] = batch_size
-    early_stop_epoch = config.getint('Training', 'early_stop_epoch')
-    params['early_stop_epoch'] = early_stop_epoch
-    w1 = config.getfloat('Training', 'w1')
-    w2 = config.getfloat('Training', 'w2')
-    w3 = config.getfloat('Training', 'w3')
-    w4 = config.getfloat('Training', 'w4')
-    params['w1'] = w1
-    params['w2'] = w2
-    params['w3'] = w3
-    params['w4'] = w4
-    negative_num = config.getint('Training', 'negative_num')
-    negative_weight = config.getfloat('Training', 'negative_weight')
-    params['negative_num'] = negative_num
-    params['negative_weight'] = negative_weight
 
-
-    gamma = config.getfloat('Training', 'gamma')
-    params['gamma'] = gamma
-    lambda_ = config.getfloat('Training', 'lambda')
-    params['lambda'] = lambda_
-    sampling_sift_pos = config.getboolean('Training', 'sampling_sift_pos')
-    params['sampling_sift_pos'] = sampling_sift_pos
-    
-    
-
-    test_batch_size = config.getint('Testing', 'test_batch_size')
-    params['test_batch_size'] = test_batch_size
-    topk = config.getint('Testing', 'topk') 
-    params['topk'] = topk
-
-    test_file_path = config['Testing']['test_file_path']
 
     # dataset processing
     train_data, valid_data, test_data, train_mat, user_num, item_num, constraint_mat = load_data(train_file_path, test_file_path, validation_proportion)
     train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle = True, num_workers=5)
-    valid_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle = True, num_workers=5)
     test_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle=False, num_workers=5)
+
+    if validation_proportion > 0: 
+        valid_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle = True, num_workers=5)
+    else:
+        valid_loader = test_loader
+        valid_data = test_data    
 
     params['user_num'] = user_num
     params['item_num'] = item_num
-
-    print()
 
     # mask matrix for testing to accelarate testing speed
     mask = torch.zeros(user_num, item_num)
@@ -418,7 +389,7 @@ class UltraGCN(nn.Module):
 Train
 '''
 ########################### TRAINING #####################################
-def train(model, optimizer, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items, params): 
+def train(model, optimizer, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items, params, report_progress): 
     device = params['device']
     best_epoch, best_recall, best_ndcg = 0, 0, 0
     early_stop_count = 0
@@ -460,18 +431,17 @@ def train(model, optimizer, train_loader, valid_loader, test_loader, mask, valid
             
         if need_test:
             start_time = time.time()
-            if valid_loader: 
-                F1_score, Precision, Recall, NDCG = test(model, valid_loader, valid_ground_truth_list, mask, params['topk'], params['user_num'])
-            else: 
-                F1_score, Precision, Recall, NDCG = test(model, test_loader, test_ground_truth_list, mask, params['topk'], params['user_num'])
+            F1_score, Precision, Recall, NDCG = test(model, valid_loader, valid_ground_truth_list, mask, params['topk'], params['user_num'])
+
 
             if params['enable_tensorboard']:
                 writer.add_scalar('Results/recall@20', Recall, epoch)
                 writer.add_scalar('Results/ndcg@20', NDCG, epoch)
             test_time = time.strftime("%H: %M: %S", time.gmtime(time.time() - start_time))
             
-            print('The time for epoch {} is: train time = {}, test time = {}'.format(epoch, train_time, test_time))
-            print("Loss = {:.5f}, F1-score: {:5f} \t Precision: {:.5f}\t Recall: {:.5f}\tNDCG: {:.5f}".format(loss.item(), F1_score, Precision, Recall, NDCG))
+            if report_progress:
+                print('The time for epoch {} is: train time = {}, test time = {}'.format(epoch, train_time, test_time))
+                print("Loss = {:.5f}, F1-score: {:5f} \t Precision: {:.5f}\t Recall: {:.5f}\tNDCG: {:.5f}".format(loss.item(), F1_score, Precision, Recall, NDCG))
 
             if Recall > best_recall:
                 best_recall, best_ndcg, best_epoch = Recall, NDCG, epoch
@@ -645,19 +615,11 @@ def test(model, test_loader, test_ground_truth_list, mask, topk, n_user):
 
     return F1_score, Precision, Recall, NDCG
 
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config_file', type=str, help='config file path')
-    args = parser.parse_args()
-
+def run(config_file_path, custom_params={}, report_progress=True):
     print('###################### UltraGCN ######################')
-    validation_proportion = 0.1
 
     print('1. Loading Configuration...')
-    params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items = data_param_prepare(args.config_file, validation_proportion)
-    
+    params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items = data_param_prepare(config_file_path, custom_params)
     print('Load Configuration OK, show them below')
     print('Configuration:')
     print(params)
@@ -667,9 +629,14 @@ if __name__ == "__main__":
     ultragcn = ultragcn.to(params['device'])
     optimizer = torch.optim.Adam(ultragcn.parameters(), lr=params['lr'])
 
-    if not validation_proportion: 
-        valid_loader = None
-
-    train(ultragcn, optimizer, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items, params)
+    train(ultragcn, optimizer, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items, params, report_progress)
 
     print('END')
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config_file', type=str, help='config file path')
+    args = parser.parse_args()
+
+    run(args.config_file)
