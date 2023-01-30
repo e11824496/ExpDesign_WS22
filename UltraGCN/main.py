@@ -80,8 +80,8 @@ def data_param_prepare(config_file, custom_params):
 
     
     # Compute \Omega to extend UltraGCN to the item-item occurrence graph
-    ii_cons_mat_path = './' + dataset + '_ii_constraint_mat'
-    ii_neigh_mat_path = './' + dataset + '_ii_neighbor_mat'
+    ii_cons_mat_path = './' + dataset + f'_ii_constraint_mat_{ii_neighbor_num}'
+    ii_neigh_mat_path = './' + dataset + f'_ii_neighbor_mat_{ii_neighbor_num}'
     
     if os.path.exists(ii_cons_mat_path):
         ii_constraint_mat = pload(ii_cons_mat_path)
@@ -465,8 +465,10 @@ def train(model, optimizer, train_loader, valid_loader, test_loader, mask, valid
 
     print('Training end!')
 
+    print('Load best model')
+    model.load_state_dict(torch.load(params['model_save_path']))
     F1_score, Precision, Recall, NDCG = test(model, test_loader, test_ground_truth_list, mask, params['topk'], params['user_num'])
-    print("Performance on TEST set: F1-score: {:5f} \t Precision: {:.5f}\t Recall: {:.5f}\tNDCG: {:.5f}".format(loss.item(), F1_score, Precision, Recall, NDCG))
+    print("Performance on TEST set: F1-score: {:5f} \t Precision: {:.5f}\t Recall: {:.5f}\tNDCG: {:.5f}".format(F1_score, Precision, Recall, NDCG))
 
 
 
@@ -627,7 +629,7 @@ def run(config_file_path, custom_params={}, report_progress=True):
 
     ultragcn = UltraGCN(params, constraint_mat, ii_constraint_mat, ii_neighbor_mat)
     ultragcn = ultragcn.to(params['device'])
-    optimizer = torch.optim.Adam(ultragcn.parameters(), lr=params['lr'])
+    optimizer = torch.optim.Adam(ultragcn.parameters(), lr=params['learning_rate'])
 
     train(ultragcn, optimizer, train_loader, valid_loader, test_loader, mask, valid_ground_truth_list, test_ground_truth_list, interacted_items, params, report_progress)
 
